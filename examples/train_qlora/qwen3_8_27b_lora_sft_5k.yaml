@@ -1,0 +1,69 @@
+# Qwen3.8-27B QLoRA SFT on a ~5K-sample dataset (single CUDA GPU, >=48 GB recommended).
+# Based on examples/train_qlora/qwen3_lora_sft_otfq.yaml and the llamafactory-qwen38-sft skill.
+#
+# Usage (run from the LlamaFactory directory):
+#   CUDA_VISIBLE_DEVICES=0 llamafactory-cli train examples/train_qlora/qwen3_8_27b_lora_sft_5k.yaml
+#
+# Smoke test first: add `max_steps: 5` and `save_strategy: "no"` and use a scratch output_dir.
+# Steps with the defaults below: 5322 train / 16 effective batch ≈ 333 steps/epoch, ~1000 total.
+
+### model
+model_name_or_path: Qwen/Qwen3.8-27B
+quantization_bit: 4
+quantization_method: bnb
+double_quantization: true
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all            # all linear layers of the language model
+lora_rank: 16               # 8-64 is typical; 16 is a solid default for 5K samples
+lora_alpha: 32              # 2 x rank
+lora_dropout: 0.05
+
+### dataset
+dataset_dir: ../datasets    # folder holding dataset_info.json
+dataset: reasoningv         # GipAI/ReaoningV, 5322 samples (sharegpt messages format)
+template: qwen3_8           # required for Qwen3.8; do not use qwen3 / qwen3_5
+enable_thinking: true       # train on <think> blocks; set false to strip them
+cutoff_len: 32768           # ReaoningV: median ~2.8K, p90 ~10K, p99 ~15K tokens; lower to 8192-12288 if OOM
+preprocessing_num_workers: 16
+dataloader_num_workers: 4
+overwrite_cache: true
+
+### output
+output_dir: saves/Qwen3.8-27B/qlora/sft-5k-r16
+logging_steps: 5
+save_strategy: epoch
+# save_steps: 100
+save_total_limit: 3
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+report_to: none             # choices: [none, wandb, tensorboard, swanlab, mlflow]
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 16   # effective batch size 16
+learning_rate: 1.0e-4             # 5e-5 to 2e-4 is the usual LoRA range
+num_train_epochs: 3.0             # 2-3 epochs for 5K samples; watch eval loss for overfitting
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+weight_decay: 0.0
+max_grad_norm: 1.0
+bf16: true                        # gradient checkpointing is on by default in LlamaFactory
+disable_shuffling: true           # train in file order (SequentialSampler); default false = random order each epoch
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+seed: 42
+
+### eval
+# Do NOT use val_size with disable_shuffling: it splits via datasets.train_test_split,
+# which shuffles the whole dataset and destroys your order. Use a separate held-out file instead:
+# register it in ../datasets/dataset_info.json, then uncomment below.
+# eval_dataset: reasoningv_eval
+# per_device_eval_batch_size: 1
+# eval_strategy: steps
+# eval_steps: 100
